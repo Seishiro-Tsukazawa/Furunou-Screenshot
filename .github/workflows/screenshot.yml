@@ -41,7 +41,7 @@ jobs:
               // ==========================================
               const sites = [
                 { name: 'rakuten',    url: 'https://event.rakuten.co.jp/furusato/ranking/' },
-                { name: 'furu-choice',url: 'https://www.furusato-tax.jp/rank_top?header' },
+                { name: 'furu-choice',url: 'https://www.furusato-tax.jp/rank' },
                 { name: 'furunavi',   url: 'https://furunavi.jp/ranking_total.aspx' },
                 { name: 'satofull',   url: 'https://www.satofull.jp/products/ranking.php' }
               ];
