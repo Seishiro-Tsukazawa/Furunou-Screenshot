@@ -1,10 +1,12 @@
-name: Test Full Page Screenshot
+name: Rakuten Only Screenshot
 
 on:
+  schedule:
+    - cron: '0 0 * * *' # 毎日朝9時 (JST)
   workflow_dispatch: # 手動実行用
 
 jobs:
-  take-screenshots:
+  take-rakuten:
     runs-on: ubuntu-latest
     
     steps:
@@ -20,55 +22,86 @@ jobs:
           npm init -y
           npm i -D playwright
           npx playwright install --with-deps chromium
-          # 日本語フォントを入れる（文字化け防止）
           sudo apt-get update
           sudo apt-get install -y fonts-ipafont-gothic fonts-wqy-zenhei
 
-      - name: Run Screenshot Script
+      - name: Run Rakuten Script
         run: |
           node -e "
             const { chromium } = require('playwright');
             const fs = require('fs');
 
-            (async () => {
-              // ---------------------------------------------------------
-              // ▼ 撮影対象リスト
-              // ---------------------------------------------------------
-              const sites = [
-                { name: 'rakuten',    url: 'https://event.rakuten.co.jp/furusato/ranking/' },
-                { name: 'furu-choice',url: 'https://www.furusato-tax.jp/rank' },
-                { name: 'furunavi',   url: 'https://furunavi.jp/ranking_total.aspx' },
-                { name: 'satofull',   url: 'https://www.satofull.jp/products/ranking.php' }
-              ];
+            // -------------------------------------------------------
+            // ▼ 楽天専用：ゆっくりスクロール関数
+            // -------------------------------------------------------
+            async function autoScroll(page) {
+              await page.evaluate(async () => {
+                await new Promise((resolve) => {
+                  let totalHeight = 0;
+                  const distance = 200; // 少し細かくスクロール
+                  const timer = setInterval(() => {
+                    const scrollHeight = document.body.scrollHeight;
+                    window.scrollBy(0, distance);
+                    totalHeight += distance;
 
-              const browser = await chromium.launch();
-              const context = await browser.newContext({
-                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                viewport: { width: 1280, height: 800 } 
+                    // ページ最下部付近まで行ったら終了
+                    if (totalHeight >= scrollHeight - window.innerHeight) {
+                      clearInterval(timer);
+                      resolve();
+                    }
+                  }, 100); 
+                });
               });
+            }
+
+            (async () => {
+              // ターゲットは楽天のみ
+              const site = { name: 'rakuten', url: 'https://event.rakuten.co.jp/furusato/ranking/' };
+
+              // ボット検知回避設定
+              const browser = await chromium.launch({
+                args: ['--disable-blink-features=AutomationControlled']
+              });
+              
+              const context = await browser.newContext({
+                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+                viewport: { width: 1280, height: 800 },
+                locale: 'ja-JP'
+              });
+              
               const page = await context.newPage();
               
+              // webdriverフラグを隠蔽
+              await page.addInitScript(() => {
+                Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+              });
+
               const dir = 'screenshots';
               if (!fs.existsSync(dir)) fs.mkdirSync(dir);
 
-              for (const site of sites) {
-                try {
-                  console.log(\`Navigating to \${site.name}...\`);
-                  
-                  // 読み込み（タイムアウト長め）
-                  await page.goto(site.url, { waitUntil: 'domcontentloaded', timeout: 90000 });
-                  await page.waitForTimeout(5000); // 描画待ち
+              try {
+                console.log('Navigating to Rakuten...');
+                
+                // 読み込み（タイムアウト120秒）
+                await page.goto(site.url, { waitUntil: 'domcontentloaded', timeout: 120000 });
+                
+                console.log('Scrolling to load images...');
+                await autoScroll(page);
+                
+                // 描画完了を待つ
+                await page.waitForTimeout(3000);
 
-                  // ▼ フルページ撮影の設定
-                  await page.screenshot({ 
-                    path: \`\${dir}/\${site.name}.png\`,
-                    fullPage: true 
-                  });
-                  console.log(\`Saved: \${site.name}\`);
-                } catch (e) {
-                  console.error(\`Failed: \${site.name}\`, e);
-                }
+                // 撮影
+                await page.screenshot({ 
+                  path: \`\${dir}/\${site.name}.png\`,
+                  fullPage: true 
+                });
+                console.log('Saved: rakuten.png');
+
+              } catch (e) {
+                console.error('Failed to capture Rakuten:', e);
               }
+
               await browser.close();
             })();
           "
@@ -76,6 +109,6 @@ jobs:
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: full-page-screenshots
+          name: rakuten-screenshot
           path: screenshots/
           retention-days: 3
