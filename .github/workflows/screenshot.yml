@@ -1,0 +1,84 @@
+name: Daily Screenshots
+
+on:
+  schedule:
+    - cron: '0 0 * * *' # 毎日朝9時 (JST)
+  workflow_dispatch: # 手動実行用
+
+jobs:
+  take-screenshots:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Dependencies
+        run: |
+          npm init -y
+          npm i -D playwright
+          npx playwright install --with-deps chromium
+          sudo apt-get update
+          sudo apt-get install -y fonts-ipafont-gothic fonts-wqy-zenhei
+
+      - name: Run Screenshot Script
+        run: |
+          node -e "
+            const { chromium } = require('playwright');
+            (async () => {
+              // ---------------------------------------------------------
+              // ▼ いただいたURLを反映しました
+              // ---------------------------------------------------------
+              const sites = [
+                { name: 'rakuten',    url: 'https://event.rakuten.co.jp/furusato/ranking/' },
+                { name: 'furu-choice',url: 'https://www.furusato-tax.jp/rank_top?header' },
+                { name: 'furunavi',   url: 'https://furunavi.jp/ranking_total.aspx' },
+                { name: 'satofull',   url: 'https://www.satofull.jp/products/ranking.php' }
+              ];
+              // ---------------------------------------------------------
+
+              const browser = await chromium.launch();
+              // 一般的なブラウザに見せかける設定（重要）
+              const context = await browser.newContext({
+                userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                viewport: { width: 1280, height: 800 }
+              });
+              const page = await context.newPage();
+              
+              const fs = require('fs');
+              const dir = 'screenshots';
+              if (!fs.existsSync(dir)) fs.mkdirSync(dir);
+
+              for (const site of sites) {
+                try {
+                  console.log(\`Navigating to \${site.name}...\`);
+                  
+                  // タイムアウトを少し長めに設定(60秒)
+                  await page.goto(site.url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+                  
+                  // ランキングの読み込み待ち（念のため5秒待機）
+                  await page.waitForTimeout(5000);
+
+                  // 縦に長いページなので、高さ3000pxまで広げて撮影
+                  await page.setViewportSize({ width: 1280, height: 3000 });
+                  
+                  await page.screenshot({ path: \`\${dir}/\${site.name}.png\` });
+                  console.log(\`Saved: \${site.name}\`);
+                } catch (e) {
+                  console.error(\`Failed: \${site.name}\`, e);
+                }
+              }
+              await browser.close();
+            })();
+          "
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-screenshots
+          path: screenshots/
+          retention-days: 30
