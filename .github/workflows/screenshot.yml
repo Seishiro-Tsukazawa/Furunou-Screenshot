@@ -1,12 +1,10 @@
-name: Full Page Screenshots to Drive
+name: Test Full Page Screenshot
 
 on:
-  schedule:
-    - cron: '0 0 * * *' # 毎日朝9時 (JST)
-  workflow_dispatch:
+  workflow_dispatch: # 手動実行用
 
 jobs:
-  take-screenshots-and-upload:
+  take-screenshots:
     runs-on: ubuntu-latest
     
     steps:
@@ -20,92 +18,64 @@ jobs:
       - name: Install Dependencies
         run: |
           npm init -y
-          npm i -D playwright googleapis
+          npm i -D playwright
           npx playwright install --with-deps chromium
+          # 日本語フォントを入れる（文字化け防止）
           sudo apt-get update
           sudo apt-get install -y fonts-ipafont-gothic fonts-wqy-zenhei
 
-      - name: Run Script
-        env:
-          GCP_SA_KEY: ${{ secrets.GCP_SA_KEY }}
-          GDRIVE_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+      - name: Run Screenshot Script
         run: |
           node -e "
             const { chromium } = require('playwright');
-            const { google } = require('googleapis');
             const fs = require('fs');
 
             (async () => {
-              // ==========================================
-              // ▼ 撮影したいサイト
-              // ==========================================
+              // ---------------------------------------------------------
+              // ▼ 撮影対象リスト
+              // ---------------------------------------------------------
               const sites = [
                 { name: 'rakuten',    url: 'https://event.rakuten.co.jp/furusato/ranking/' },
                 { name: 'furu-choice',url: 'https://www.furusato-tax.jp/rank' },
                 { name: 'furunavi',   url: 'https://furunavi.jp/ranking_total.aspx' },
                 { name: 'satofull',   url: 'https://www.satofull.jp/products/ranking.php' }
               ];
-              // ==========================================
 
-              // 1. Google Drive認証
-              const auth = new google.auth.GoogleAuth({
-                credentials: JSON.parse(process.env.GCP_SA_KEY),
-                scopes: ['https://www.googleapis.com/auth/drive.file'],
-              });
-              const drive = google.drive({ version: 'v3', auth });
-
-              // 2. ブラウザ起動
               const browser = await chromium.launch();
               const context = await browser.newContext({
                 userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                viewport: { width: 1280, height: 800 } // 初期サイズ（撮影時に自動で伸びます）
+                viewport: { width: 1280, height: 800 } 
               });
               const page = await context.newPage();
-
-              if (!fs.existsSync('screenshots')) fs.mkdirSync('screenshots');
-
-              const dateStr = new Date().toISOString().split('T')[0]; // 2024-05-21形式
+              
+              const dir = 'screenshots';
+              if (!fs.existsSync(dir)) fs.mkdirSync(dir);
 
               for (const site of sites) {
                 try {
-                  console.log(\`Processing \${site.name}...\`);
+                  console.log(\`Navigating to \${site.name}...\`);
                   
-                  // ページ移動 & 読み込み待ち
+                  // 読み込み（タイムアウト長め）
                   await page.goto(site.url, { waitUntil: 'domcontentloaded', timeout: 90000 });
                   await page.waitForTimeout(5000); // 描画待ち
 
-                  const fileName = \`\${dateStr}_\${site.name}.png\`;
-                  const filePath = \`screenshots/\${fileName}\`;
-
-                  // ▼ ここを変更しました：フルページ撮影
-                  await page.screenshot({
-                    path: filePath,
+                  // ▼ フルページ撮影の設定
+                  await page.screenshot({ 
+                    path: \`\${dir}/\${site.name}.png\`,
                     fullPage: true 
                   });
-                  console.log(\`Captured: \${fileName}\`);
-
-                  // Googleドライブへアップロード
-                  const fileMetadata = {
-                    name: fileName,
-                    parents: [process.env.GDRIVE_FOLDER_ID]
-                  };
-                  const media = {
-                    mimeType: 'image/png',
-                    body: fs.createReadStream(filePath)
-                  };
-
-                  const file = await drive.files.create({
-                    resource: fileMetadata,
-                    media: media,
-                    fields: 'id'
-                  });
-                  console.log(\`Uploaded to Drive ID: \${file.data.id}\`);
-
+                  console.log(\`Saved: \${site.name}\`);
                 } catch (e) {
-                  console.error(\`Error with \${site.name}:\`, e);
+                  console.error(\`Failed: \${site.name}\`, e);
                 }
               }
-
               await browser.close();
             })();
           "
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-page-screenshots
+          path: screenshots/
+          retention-days: 3
